@@ -12,7 +12,7 @@ import io
 import streamlit as st
 from PIL import Image
 from playwright.async_api import async_playwright
-from playwright_stealth import stealth_async
+from playwright_stealth import Stealth
 
 st.set_page_config(page_title="Full Page Screenshot Tool", page_icon="📸", layout="wide")
 
@@ -24,7 +24,8 @@ url_input = st.text_input("Enter Web URL:", placeholder="https://example.com")
 width = st.number_input("Viewport Width (px):", min_value=800, max_value=3840, value=1920, step=100)
 
 async def capture_full_page(url: str, viewport_width: int):
-    async with async_playwright() as p:
+    # Use Stealth class context wrapper for Playwright
+    async with Stealth().use_async(async_playwright()) as p:
         browser = await p.chromium.launch(
             headless=True,
             args=[
@@ -43,13 +44,12 @@ async def capture_full_page(url: str, viewport_width: int):
         )
 
         page = await context.new_page()
-        await stealth_async(page)
 
         try:
             await page.goto(url, wait_until="domcontentloaded", timeout=45000)
             await page.wait_for_timeout(2000)
 
-            # Auto-scroll to trigger lazy loading
+            # Auto-scroll down the page to trigger lazy-loaded images
             await page.evaluate("""
                 async () => {
                     await new Promise((resolve) => {
@@ -72,7 +72,7 @@ async def capture_full_page(url: str, viewport_width: int):
             
             await page.wait_for_timeout(1500)
 
-            # Convert fixed headers to absolute so they don't stretch down the full screenshot
+            # Convert fixed headers to absolute so they don't stretch down full screenshot
             await page.evaluate("""
                 () => {
                     const elements = document.querySelectorAll('*');
@@ -109,7 +109,7 @@ if st.button("Capture Screenshot", type="primary"):
         elif img_bytes:
             st.success("Screenshot captured successfully!")
             image = Image.open(io.BytesIO(img_bytes))
-            st.image(image, caption=f"Full Screenshot of {target_url}", use_column_width=True)
+            st.image(image, caption=f"Full Screenshot of {target_url}", use_container_width=True)
             st.download_button(
                 label="📥 Download Screenshot (PNG)",
                 data=img_bytes,
