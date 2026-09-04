@@ -49,7 +49,6 @@ async def capture_full_page(url: str, viewport_width: int):
         )
 
         # 1. PRE-SET COMMON AGE & COOKIE VERIFICATION COOKIES
-        # Many sites check cookies like 'age_verified', 'is_over_18', or 'adult'
         parsed_domain = url.split("//")[-1].split("/")[0]
         common_cookies = [
             {"name": "age_verified", "value": "true", "domain": f".{parsed_domain}", "path": "/"},
@@ -72,20 +71,16 @@ async def capture_full_page(url: str, viewport_width: int):
             # 2. AUTO-CLICK AGE VERIFICATION & POPUP BUTTONS
             await page.evaluate("""
                 () => {
-                    // Common keywords on age gate buttons
                     const targetKeywords = [
                         'yes', 'i am 18', 'i am over 18', 'i am 21', 'i am over 21', 
                         'enter', 'confirm', 'agree', 'verify', 'accept', 'i agree',
                         'over 18', 'over 21', 'allow', 'continue'
                     ];
 
-                    // Find all clickable elements
                     const elements = Array.from(document.querySelectorAll('button, a, input[type="button"], input[type="submit"], div[role="button"]'));
 
                     for (const el of elements) {
-                        const text = (el.innerText || el.value || '').strip ? (el.innerText || el.value || '').trim().toLowerCase() : '';
-                        
-                        // Check if button text matches any age check keywords
+                        const text = (el.innerText || el.value || '').trim().toLowerCase();
                         if (targetKeywords.some(keyword => text === keyword || text.includes(keyword))) {
                             try {
                                 el.click();
@@ -95,7 +90,6 @@ async def capture_full_page(url: str, viewport_width: int):
                 }
             """)
 
-            # Wait briefly after clicking popups
             await page.wait_for_timeout(1500)
 
             # 3. AUTO-SCROLL TO TRIGGER LAZY-LOADED IMAGES
@@ -121,19 +115,17 @@ async def capture_full_page(url: str, viewport_width: int):
             
             await page.wait_for_timeout(1500)
 
-            # 4. REMOVE REMAINING OVERLAYS AND FIX STICKY HEADERS
+            # 4. REMOVE REMAINING OVERLAYS AND FIX STICKY HEADERS (FIXED JS SYNTAX)
             await page.evaluate("""
                 () => {
-                    // Hide modal backdrops & sticky headers
                     const elements = document.querySelectorAll('*');
                     for (let el of elements) {
                         const style = window.getComputedStyle(el);
                         if (style.position === 'fixed') {
                             el.style.position = 'absolute';
                         }
-                        // Remove dark overlay screens if any are left
-                        if (style.zIndex > 999 and (style.backgroundColor.includes('rgba') or style.position === 'fixed')) {
-                            // Only remove if it covers high screen area
+                        const zIndex = parseInt(style.zIndex, 10);
+                        if (!isNaN(zIndex) && zIndex > 999 && (style.backgroundColor.includes('rgba') || style.position === 'fixed')) {
                             const rect = el.getBoundingClientRect();
                             if (rect.width >= window.innerWidth * 0.8 && rect.height >= window.innerHeight * 0.8) {
                                 el.style.display = 'none';
@@ -169,7 +161,7 @@ if st.button("Capture Screenshot", type="primary"):
             st.session_state.img_bytes = img_bytes
             st.session_state.target_url = target_url
 
-# Render download button and preview if screenshot exists in session state
+# Render download button and preview
 if st.session_state.img_bytes:
     st.success("Screenshot captured successfully!")
 
