@@ -8,8 +8,10 @@ except Exception as e:
     print(f"Playwright browser installation warning: {e}")
 
 import asyncio
+import base64
 import io
 import streamlit as st
+import streamlit.components.v1 as components
 from PIL import Image
 from playwright.async_api import async_playwright
 from playwright_stealth import Stealth
@@ -93,6 +95,21 @@ async def capture_full_page(url: str, viewport_width: int):
         finally:
             await browser.close()
 
+# Function to trigger browser download automatically
+def trigger_auto_download(img_bytes, filename="full_screenshot.png"):
+    b64 = base64.b64encode(img_bytes).decode("utf-8")
+    js_code = f"""
+    <script>
+        const link = document.createElement('a');
+        link.href = 'data:image/png;base64,{b64}';
+        link.download = '{filename}';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    </script>
+    """
+    components.html(js_code, height=0, width=0)
+
 if st.button("Capture Screenshot", type="primary"):
     if not url_input:
         st.warning("Please enter a valid URL.")
@@ -107,11 +124,18 @@ if st.button("Capture Screenshot", type="primary"):
         if error:
             st.error(f"Failed to capture screenshot: {error}")
         elif img_bytes:
-            st.success("Screenshot captured successfully!")
+            st.success("Screenshot captured! Downloading automatically...")
+            
+            # 1. Automatically start browser download
+            trigger_auto_download(img_bytes, filename="full_screenshot.png")
+            
+            # 2. Display the preview image in Streamlit
             image = Image.open(io.BytesIO(img_bytes))
             st.image(image, caption=f"Full Screenshot of {target_url}", use_container_width=True)
+
+            # 3. Fallback download button (in case browser blocks auto-downloads)
             st.download_button(
-                label="📥 Download Screenshot (PNG)",
+                label="📥 Re-download Screenshot (PNG)",
                 data=img_bytes,
                 file_name="full_screenshot.png",
                 mime="image/png"
