@@ -8,10 +8,8 @@ except Exception as e:
     print(f"Playwright browser installation warning: {e}")
 
 import asyncio
-import base64
 import io
 import streamlit as st
-import streamlit.components.v1 as components
 from PIL import Image
 from playwright.async_api import async_playwright
 from playwright_stealth import Stealth
@@ -21,12 +19,17 @@ st.set_page_config(page_title="Full Page Screenshot Tool", page_icon="📸", lay
 st.title("📸 Full-Page Web Screenshot Tool")
 st.write("Enter any public URL below to generate a complete, full-page screenshot.")
 
+# Initialize session state for holding screenshot data
+if "img_bytes" not in st.session_state:
+    st.session_state.img_bytes = None
+if "target_url" not in st.session_state:
+    st.session_state.target_url = ""
+
 # User Inputs
 url_input = st.text_input("Enter Web URL:", placeholder="https://example.com")
 width = st.number_input("Viewport Width (px):", min_value=800, max_value=3840, value=1920, step=100)
 
 async def capture_full_page(url: str, viewport_width: int):
-    # Use Stealth class context wrapper for Playwright
     async with Stealth().use_async(async_playwright()) as p:
         browser = await p.chromium.launch(
             headless=True,
@@ -74,7 +77,7 @@ async def capture_full_page(url: str, viewport_width: int):
             
             await page.wait_for_timeout(1500)
 
-            # Convert fixed headers to absolute so they don't stretch down full screenshot
+            # Convert fixed headers to absolute so they don't tile across full screenshot
             await page.evaluate("""
                 () => {
                     const elements = document.querySelectorAll('*');
@@ -95,21 +98,6 @@ async def capture_full_page(url: str, viewport_width: int):
         finally:
             await browser.close()
 
-# Function to trigger browser download automatically
-def trigger_auto_download(img_bytes, filename="full_screenshot.png"):
-    b64 = base64.b64encode(img_bytes).decode("utf-8")
-    js_code = f"""
-    <script>
-        const link = document.createElement('a');
-        link.href = 'data:image/png;base64,{b64}';
-        link.download = '{filename}';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-    </script>
-    """
-    components.html(js_code, height=0, width=0)
-
 if st.button("Capture Screenshot", type="primary"):
     if not url_input:
         st.warning("Please enter a valid URL.")
@@ -123,20 +111,24 @@ if st.button("Capture Screenshot", type="primary"):
 
         if error:
             st.error(f"Failed to capture screenshot: {error}")
+            st.session_state.img_bytes = None
         elif img_bytes:
-            st.success("Screenshot captured! Downloading automatically...")
-            
-            # 1. Automatically start browser download
-            trigger_auto_download(img_bytes, filename="full_screenshot.png")
-            
-            # 2. Display the preview image in Streamlit
-            image = Image.open(io.BytesIO(img_bytes))
-            st.image(image, caption=f"Full Screenshot of {target_url}", use_container_width=True)
+            st.session_state.img_bytes = img_bytes
+            st.session_state.target_url = target_url
 
-            # 3. Fallback download button (in case browser blocks auto-downloads)
-            st.download_button(
-                label="📥 Re-download Screenshot (PNG)",
-                data=img_bytes,
-                file_name="full_screenshot.png",
-                mime="image/png"
-            )
+# Render download button and preview if screenshot exists in session state
+if st.session_state.img_bytes:
+    st.success("Screenshot captured successfully!")
+
+    # Native Streamlit download button placed prominently at the top
+    st.download_button(
+        label="📥 CLICK HERE TO DOWNLOAD SCREENSHOT (PNG)",
+        data=st.session_state.img_bytes,
+        file_name="full_screenshot.png",
+        mime="image/png",
+        type="primary"
+    )
+
+    # Display image preview below the download button
+    image = Image.open(io.BytesIO(st.session_state.img_bytes))
+    st.image(image, caption=f"Full Screenshot Preview of {st.session_state.target_url}", use_container_width=True)
