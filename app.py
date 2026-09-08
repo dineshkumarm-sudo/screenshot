@@ -1,5 +1,9 @@
+import os
 import subprocess
 import sys
+
+# Ensure Playwright installs browsers in a writeable user directory
+os.environ["PLAYWRIGHT_BROWSERS_PATH"] = "0"
 
 # Install Chromium & OS dependencies at startup
 try:
@@ -30,59 +34,65 @@ width = st.number_input("Viewport Width (px):", min_value=800, max_value=3840, v
 
 def capture_full_page(url: str, viewport_width: int):
     with sync_playwright() as p:
-        browser = p.chromium.launch(
-            headless=True,
-            args=[
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-blink-features=AutomationControlled",
-                "--disable-infobars",
-                "--window-size=1920,1080",
+        try:
+            # Launch Chromium with robust flags for Streamlit Cloud Linux containers
+            browser = p.chromium.launch(
+                headless=True,
+                args=[
+                    "--headless=new",
+                    "--no-sandbox",
+                    "--disable-setuid-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--disable-gpu",
+                    "--no-zygote",
+                    "--single-process",
+                    "--disable-blink-features=AutomationControlled",
+                ]
+            )
+        except Exception as launch_err:
+            return None, f"Browser launch failed: {str(launch_err)}"
+
+        try:
+            context = browser.new_context(
+                viewport={"width": viewport_width, "height": 1080},
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+                locale="en-US",
+                timezone_id="America/New_York",
+                extra_http_headers={
+                    "Accept-Language": "en-US,en;q=0.9",
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8",
+                }
+            )
+
+            # 1. Preset age verification cookies
+            parsed_domain = url.split("//")[-1].split("/")[0]
+            common_cookies = [
+                {"name": "age_verified", "value": "true", "domain": f".{parsed_domain}", "path": "/"},
+                {"name": "is_over_18", "value": "1", "domain": f".{parsed_domain}", "path": "/"},
+                {"name": "adult_verified", "value": "true", "domain": f".{parsed_domain}", "path": "/"},
+                {"name": "ageGatePassed", "value": "true", "domain": f".{parsed_domain}", "path": "/"},
+                {"name": "over18", "value": "1", "domain": f".{parsed_domain}", "path": "/"},
             ]
-        )
-        
-        context = browser.new_context(
-            viewport={"width": viewport_width, "height": 1080},
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
-            locale="en-US",
-            timezone_id="America/New_York",
-            extra_http_headers={
-                "Accept-Language": "en-US,en;q=0.9",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8",
-            }
-        )
+            try:
+                context.add_cookies(common_cookies)
+            except Exception:
+                pass
 
-        # 1. Preset age verification cookies
-        parsed_domain = url.split("//")[-1].split("/")[0]
-        common_cookies = [
-            {"name": "age_verified", "value": "true", "domain": f".{parsed_domain}", "path": "/"},
-            {"name": "is_over_18", "value": "1", "domain": f".{parsed_domain}", "path": "/"},
-            {"name": "adult_verified", "value": "true", "domain": f".{parsed_domain}", "path": "/"},
-            {"name": "ageGatePassed", "value": "true", "domain": f".{parsed_domain}", "path": "/"},
-            {"name": "over18", "value": "1", "domain": f".{parsed_domain}", "path": "/"},
-        ]
-        try:
-            context.add_cookies(common_cookies)
-        except Exception:
-            pass
+            page = context.new_page()
 
-        page = context.new_page()
+            # Anti-detection bypass
+            page.add_init_script("""
+                Object.defineProperty(navigator, 'webdriver', {
+                    get: () => undefined
+                });
+            """)
 
-        # Native anti-detection script
-        page.add_init_script("""
-            Object.defineProperty(navigator, 'webdriver', {
-                get: () => undefined
-            });
-        """)
-
-        try:
             response = page.goto(url, wait_until="domcontentloaded", timeout=45000)
             
             if response and response.status >= 400:
                 return None, f"Website returned HTTP error status {response.status}."
 
-            page.wait_for_timeout(2500)
+            page.wait_for_timeout(2000)
 
             # 2. Auto-click popups & age verification gates
             page.evaluate("""
@@ -104,14 +114,14 @@ def capture_full_page(url: str, viewport_width: int):
                 }
             """)
 
-            page.wait_for_timeout(1500)
+            page.wait_for_timeout(1000)
 
-            # 3. Auto-scroll to load all dynamic elements
+            # 3. Auto-scroll to load dynamic images
             page.evaluate("""
                 async () => {
                     await new Promise((resolve) => {
                         let totalHeight = 0;
-                        const distance = 300;
+                        const distance = 400;
                         const timer = setInterval(() => {
                             const scrollHeight = document.body.scrollHeight;
                             window.scrollBy(0, distance);
@@ -127,9 +137,9 @@ def capture_full_page(url: str, viewport_width: int):
                 }
             """)
             
-            page.wait_for_timeout(1500)
+            page.wait_for_timeout(1000)
 
-            # 4. Hide sticky headers and banners
+            # 4. Hide sticky headers
             page.evaluate("""
                 () => {
                     const elements = document.querySelectorAll('*');
@@ -137,13 +147,6 @@ def capture_full_page(url: str, viewport_width: int):
                         const style = window.getComputedStyle(el);
                         if (style.position === 'fixed') {
                             el.style.position = 'absolute';
-                        }
-                        const zIndex = parseInt(style.zIndex, 10);
-                        if (!isNaN(zIndex) && zIndex > 999 && (style.backgroundColor.includes('rgba') || style.position === 'fixed')) {
-                            const rect = el.getBoundingClientRect();
-                            if (rect.width >= window.innerWidth * 0.8 && rect.height >= window.innerHeight * 0.8) {
-                                el.style.display = 'none';
-                            }
                         }
                     }
                 }
