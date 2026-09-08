@@ -1,18 +1,17 @@
 import subprocess
 import sys
 
-# Auto-install Playwright Chromium & system libraries on startup
+# Install Chromium & OS dependencies at startup
 try:
     subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=True)
     subprocess.run([sys.executable, "-m", "playwright", "install-deps", "chromium"], check=True)
 except Exception as e:
-    print(f"Playwright installation warning: {e}")
+    print(f"Playwright installation note: {e}")
 
-import asyncio
 import io
 import streamlit as st
 from PIL import Image
-from playwright.async_api import async_playwright
+from playwright.sync_api import sync_playwright
 
 st.set_page_config(page_title="Full Page Screenshot Tool", page_icon="📸", layout="wide")
 
@@ -29,10 +28,9 @@ if "target_url" not in st.session_state:
 url_input = st.text_input("Enter Web URL:", placeholder="https://example.com")
 width = st.number_input("Viewport Width (px):", min_value=800, max_value=3840, value=1920, step=100)
 
-async def capture_full_page(url: str, viewport_width: int):
-    async with async_playwright() as p:
-        # Launch standard Chromium with native anti-detection arguments
-        browser = await p.chromium.launch(
+def capture_full_page(url: str, viewport_width: int):
+    with sync_playwright() as p:
+        browser = p.chromium.launch(
             headless=True,
             args=[
                 "--no-sandbox",
@@ -44,8 +42,7 @@ async def capture_full_page(url: str, viewport_width: int):
             ]
         )
         
-        # Real Desktop context mimicking a normal Chrome user session
-        context = await browser.new_context(
+        context = browser.new_context(
             viewport={"width": viewport_width, "height": 1080},
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
             locale="en-US",
@@ -56,7 +53,7 @@ async def capture_full_page(url: str, viewport_width: int):
             }
         )
 
-        # 1. PRE-SET COMMON COOKIES FOR AGE GATES
+        # 1. Preset age verification cookies
         parsed_domain = url.split("//")[-1].split("/")[0]
         common_cookies = [
             {"name": "age_verified", "value": "true", "domain": f".{parsed_domain}", "path": "/"},
@@ -66,29 +63,29 @@ async def capture_full_page(url: str, viewport_width: int):
             {"name": "over18", "value": "1", "domain": f".{parsed_domain}", "path": "/"},
         ]
         try:
-            await context.add_cookies(common_cookies)
+            context.add_cookies(common_cookies)
         except Exception:
             pass
 
-        page = await context.new_page()
+        page = context.new_page()
 
-        # Mask navigator.webdriver flag natively
-        await page.add_init_script("""
+        # Native anti-detection script
+        page.add_init_script("""
             Object.defineProperty(navigator, 'webdriver', {
                 get: () => undefined
             });
         """)
 
         try:
-            response = await page.goto(url, wait_until="domcontentloaded", timeout=45000)
+            response = page.goto(url, wait_until="domcontentloaded", timeout=45000)
             
             if response and response.status >= 400:
-                return None, f"Website returned HTTP error status {response.status}. Access might be restricted or blocked."
+                return None, f"Website returned HTTP error status {response.status}."
 
-            await page.wait_for_timeout(2500)
+            page.wait_for_timeout(2500)
 
-            # 2. AUTO-CLICK AGE VERIFICATION & POPUP BUTTONS
-            await page.evaluate("""
+            # 2. Auto-click popups & age verification gates
+            page.evaluate("""
                 () => {
                     const targetKeywords = [
                         'yes', 'i am 18', 'i am over 18', 'i am 21', 'i am over 21', 
@@ -101,18 +98,16 @@ async def capture_full_page(url: str, viewport_width: int):
                     for (const el of elements) {
                         const text = (el.innerText || el.value || '').trim().toLowerCase();
                         if (targetKeywords.some(keyword => text === keyword || text.includes(keyword))) {
-                            try {
-                                el.click();
-                            } catch (e) {}
+                            try { el.click(); } catch (e) {}
                         }
                     }
                 }
             """)
 
-            await page.wait_for_timeout(1500)
+            page.wait_for_timeout(1500)
 
-            # 3. AUTO-SCROLL TO TRIGGER LAZY-LOADED IMAGES
-            await page.evaluate("""
+            # 3. Auto-scroll to load all dynamic elements
+            page.evaluate("""
                 async () => {
                     await new Promise((resolve) => {
                         let totalHeight = 0;
@@ -132,10 +127,10 @@ async def capture_full_page(url: str, viewport_width: int):
                 }
             """)
             
-            await page.wait_for_timeout(1500)
+            page.wait_for_timeout(1500)
 
-            # 4. REMOVE OVERLAYS & FIX STICKY HEADERS
-            await page.evaluate("""
+            # 4. Hide sticky headers and banners
+            page.evaluate("""
                 () => {
                     const elements = document.querySelectorAll('*');
                     for (let el of elements) {
@@ -154,13 +149,13 @@ async def capture_full_page(url: str, viewport_width: int):
                 }
             """)
 
-            image_bytes = await page.screenshot(full_page=True, type="png")
+            image_bytes = page.screenshot(full_page=True, type="png")
             return image_bytes, None
 
         except Exception as e:
             return None, str(e)
         finally:
-            await browser.close()
+            browser.close()
 
 if st.button("Capture Screenshot", type="primary"):
     if not url_input:
@@ -171,7 +166,7 @@ if st.button("Capture Screenshot", type="primary"):
             target_url = "https://" + target_url
 
         with st.spinner("Navigating, bypassing age checks, and capturing..."):
-            img_bytes, error = asyncio.run(capture_full_page(target_url, width))
+            img_bytes, error = capture_full_page(target_url, width)
 
         if error:
             st.error(f"Failed to capture screenshot: {error}")
