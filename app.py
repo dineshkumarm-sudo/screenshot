@@ -13,12 +13,11 @@ import io
 import streamlit as st
 from PIL import Image
 from playwright.async_api import async_playwright
-from playwright_stealth import Stealth
 
 st.set_page_config(page_title="Full Page Screenshot Tool", page_icon="📸", layout="wide")
 
 st.title("📸 Full-Page Web Screenshot Tool")
-st.write("Enter any public URL below to generate a complete, full-page screenshot.")
+st.write("Paste any public URL to capture a complete, full-length screenshot for data validation.")
 
 # Initialize session state
 if "img_bytes" not in st.session_state:
@@ -31,7 +30,8 @@ url_input = st.text_input("Enter Web URL:", placeholder="https://example.com")
 width = st.number_input("Viewport Width (px):", min_value=800, max_value=3840, value=1920, step=100)
 
 async def capture_full_page(url: str, viewport_width: int):
-    async with Stealth().use_async(async_playwright()) as p:
+    async with async_playwright() as p:
+        # Launch standard Chromium with native anti-detection arguments
         browser = await p.chromium.launch(
             headless=True,
             args=[
@@ -39,17 +39,24 @@ async def capture_full_page(url: str, viewport_width: int):
                 "--disable-setuid-sandbox",
                 "--disable-dev-shm-usage",
                 "--disable-blink-features=AutomationControlled",
+                "--disable-infobars",
+                "--window-size=1920,1080",
             ]
         )
         
+        # Real Desktop context mimicking a normal Chrome user session
         context = await browser.new_context(
             viewport={"width": viewport_width, "height": 1080},
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
             locale="en-US",
             timezone_id="America/New_York",
+            extra_http_headers={
+                "Accept-Language": "en-US,en;q=0.9",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8",
+            }
         )
 
-        # 1. PRE-SET COMMON AGE & COOKIE VERIFICATION COOKIES
+        # 1. PRE-SET COMMON COOKIES FOR AGE GATES
         parsed_domain = url.split("//")[-1].split("/")[0]
         common_cookies = [
             {"name": "age_verified", "value": "true", "domain": f".{parsed_domain}", "path": "/"},
@@ -65,9 +72,20 @@ async def capture_full_page(url: str, viewport_width: int):
 
         page = await context.new_page()
 
+        # Mask navigator.webdriver flag natively
+        await page.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', {
+                get: () => undefined
+            });
+        """)
+
         try:
-            await page.goto(url, wait_until="domcontentloaded", timeout=45000)
-            await page.wait_for_timeout(2000)
+            response = await page.goto(url, wait_until="domcontentloaded", timeout=45000)
+            
+            if response and response.status >= 400:
+                return None, f"Website returned HTTP error status {response.status}. Access might be restricted or blocked."
+
+            await page.wait_for_timeout(2500)
 
             # 2. AUTO-CLICK AGE VERIFICATION & POPUP BUTTONS
             await page.evaluate("""
