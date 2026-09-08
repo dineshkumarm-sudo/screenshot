@@ -1,11 +1,12 @@
 import subprocess
 import sys
 
-# Auto-install chromium binary on startup if missing
+# Auto-install Playwright Chromium & system libraries on startup
 try:
     subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=True)
+    subprocess.run([sys.executable, "-m", "playwright", "install-deps", "chromium"], check=True)
 except Exception as e:
-    print(f"Playwright browser installation warning: {e}")
+    print(f"Playwright installation warning: {e}")
 
 import asyncio
 import io
@@ -60,7 +61,7 @@ async def capture_full_page(url: str, viewport_width: int):
         try:
             await context.add_cookies(common_cookies)
         except Exception:
-            pass # Ignore if domain formatting fails
+            pass
 
         page = await context.new_page()
 
@@ -115,7 +116,7 @@ async def capture_full_page(url: str, viewport_width: int):
             
             await page.wait_for_timeout(1500)
 
-            # 4. REMOVE REMAINING OVERLAYS AND FIX STICKY HEADERS (FIXED JS SYNTAX)
+            # 4. REMOVE OVERLAYS & FIX STICKY HEADERS
             await page.evaluate("""
                 () => {
                     const elements = document.querySelectorAll('*');
