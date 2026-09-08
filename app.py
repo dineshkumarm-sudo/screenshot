@@ -6,6 +6,7 @@ from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
+from webdriver_manager.core.os_manager import ChromeType
 
 st.set_page_config(page_title="Full Page Screenshot Tool", page_icon="📸", layout="wide")
 
@@ -29,16 +30,10 @@ def get_driver():
     chrome_options.add_argument("--disable-gpu")
     chrome_options.add_argument("--disable-blink-features=AutomationControlled")
     chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36")
-    
-    # Check if running in Streamlit Cloud Linux container
-    try:
-        service = Service("/usr/bin/chromedriver")
-        driver = webdriver.Chrome(service=service, options=chrome_options)
-    except Exception:
-        # Fallback for local development
-        service = Service(ChromeDriverManager().install())
-        driver = webdriver.Chrome(service=service, options=chrome_options)
-        
+
+    # Automatically fetch and manage Chromium driver in Python memory
+    service = Service(ChromeDriverManager(chrome_type=ChromeType.CHROMIUM).install())
+    driver = webdriver.Chrome(service=service, options=chrome_options)
     return driver
 
 def capture_full_page_selenium(url: str, viewport_width: int):
@@ -73,7 +68,6 @@ def capture_full_page_selenium(url: str, viewport_width: int):
 
         # 3. Scroll to trigger lazy loading
         total_height = driver.execute_script("return document.body.scrollHeight")
-        viewport_height = driver.execute_script("return window.innerHeight")
         for pos in range(0, total_height, 300):
             driver.execute_script(f"window.scrollTo(0, {pos});")
             time.sleep(0.05)
